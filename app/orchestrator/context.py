@@ -43,12 +43,18 @@ class OrchestrationContext(BaseModel):
         self.state_history.append(new_state)
 
     def is_verified(self) -> bool:
-        """Checks if the data has passed verification."""
-        if self.verification_result and self.verification_result.get("passed", False):
-            return True
-        if self.trust_score >= 0.85 and not self.failed_fields:
+        """Checks if the data has passed verification based strictly on verification_result."""
+        if self.verification_result and self.verification_result.get("passed") is True:
             return True
         return False
+
+    def reset_for_new_collection(self) -> None:
+        """Resets extraction and verification state before a fresh collection attempt."""
+        self.extracted_data = None
+        self.trust_score = 0.0
+        self.failed_fields = []
+        self.verification_result = None
+        self.ai_answer = None
 
     def to_response(self) -> SentinelResponse:
         """Serializes the context into the immutable SentinelResponse data contract."""

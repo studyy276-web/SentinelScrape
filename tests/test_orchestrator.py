@@ -434,3 +434,250 @@ class TestOrchestratorInvariantsAndGuards:
         result = orchestrator.run(ctx)
 
         assert "Summarize the stock levels" in (result.ai_answer or "")
+
+
+class TestFixRegressions:
+    """Regression tests covering Claude code review Fixes 1 through 4."""
+
+    # --- FIX 1: Fail-Closed Escalation ---
+
+    def test_escalation_fail_closed_without_explicit_success_flag(self):
+        """FIX 1: Escalator that does not set escalation_succeeded=True transitions to BLOCKED."""
+        class SilentEscalator:
+            def escalate(self, context: OrchestrationContext) -> OrchestrationContext:
+                # Does NOT set metadata["escalation_succeeded"] = True
+                context.compute_tier = "scraping_browser"
+                return context
+
+        orchestrator = SentinelOrchestrator(escalator=SilentEscalator())
+        ctx = OrchestrationContext(
+            url="https://example.com/blocked",
+            status=OrchestratorState.ESCALATING,
+        )
+        result = orchestrator.step(ctx)
+        assert result.status == OrchestratorState.BLOCKED
+        assert result.escalation_attempts == 1
+
+    def test_escalation_succeeds_when_explicitly_set(self):
+        """FIX 1: Escalator with explicit escalation_succeeded=True transitions to COLLECTING."""
+        class ExplicitSuccessEscalator:
+            def escalate(self, context: OrchestrationContext) -> OrchestrationContext:
+                context.metadata["escalation_succeeded"] = True
+                return context
+
+        orchestrator = SentinelOrchestrator(escalator=ExplicitSuccessEscalator())
+        ctx = OrchestrationContext(
+            url="https://example.com/item",
+            status=OrchestratorState.ESCALATING,
+        )
+        result = orchestrator.step(ctx)
+        assert result.status == OrchestratorState.COLLECTING
+        assert result.escalation_attempts == 1
+
+    # --- FIX 2: Single Trust-Gate Source of Truth ---
+
+    def test_verification_result_passed_false_cannot_reach_ai(self):
+        """FIX 2: verification_result passed=False prevents reaching VERIFIED / AI."""
+        orchestrator = SentinelOrchestrator()
+        ctx = OrchestrationContext(
+            verification_result={"passed": False, "score": 0.99},
+            trust_score=0.99,
+            failed_fields=[],
+            status=OrchestratorState.TRUST_GATE,
+        )
+        assert ctx.is_verified() is False
+        result = orchestrator.step(ctx)
+        assert result.status != OrchestratorState.VERIFIED
+        assert result.status != OrchestratorState.AI_READY
+
+    def test_high_trust_score_alone_cannot_reach_ai(self):
+        """FIX 2: High trust_score alone without passed verification_result cannot reach AI."""
+        orchestrator = SentinelOrchestrator()
+        ctx = OrchestrationContext(
+            verification_result=None,
+            trust_score=0.99,
+            failed_fields=[],
+            status=OrchestratorState.TRUST_GATE,
+        )
+        assert ctx.is_verified() is False
+        result = orchestrator.step(ctx)
+        assert result.status != OrchestratorState.VERIFIED
+        assert result.status != OrchestratorState.AI_READY
+
+    def test_failed_fields_empty_alone_cannot_reach_ai(self):
+        """FIX 2: Empty failed_fields alone without passed verification_result cannot reach AI."""
+        orchestrator = SentinelOrchestrator()
+        ctx = OrchestrationContext(
+            verification_result=None,
+            failed_fields=[],
+            trust_score=0.0,
+            status=OrchestratorState.TRUST_GATE,
+        )
+        assert ctx.is_verified() is False
+        result = orchestrator.step(ctx)
+        assert result.status != OrchestratorState.VERIFIED
+        assert result.status != OrchestratorState.AI_READY
+
+    def test_verification_result_passed_true_can_reach_verified_and_ai_ready(self):
+        """FIX 2: verification_result passed=True reaches VERIFIED and then AI_READY."""
+        orchestrator = SentinelOrchestrator()
+        ctx = OrchestrationContext(
+            extracted_data={"title": "Verified Product"},
+            verification_result={"passed": True, "score": 0.95},
+            status=OrchestratorState.TRUST_GATE,
+        )
+        assert ctx.is_verified() is True
+        result = orchestrator.step(ctx)
+        assert result.status == OrchestratorState.VERIFIED
+        result = orchestrator.step(result)
+        assert result.status == OrchestratorState.AI_READY
+
+    # --- FIX 3: Exception Handling ---
+
+    def test_collector_exception_handling(self):
+        """FIX 3: Collector exception transitions to FAILED and records error in metadata."""
+        class FaultyCollector:
+            def collect(self, context: OrchestrationContext) -> OrchestrationContext:
+                raise ConnectionError("Network connection reset by peer")
+
+        orchestrator = SentinelOrchestrator(collector=FaultyCollector())
+        ctx = OrchestrationContext(status=OrchestratorState.COLLECTING)
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "Network connection reset by peer" in result.metadata.get("error", "")
+        assert OrchestratorState.FAILED in result.state_history
+
+    def test_validator_exception_handling(self):
+        """FIX 3: Validator exception transitions to FAILED and records error in metadata."""
+        class FaultyValidator:
+            def validate(self, context: OrchestrationContext) -> OrchestrationContext:
+                raise ValueError("Corrupt schema validation rule")
+
+        orchestrator = SentinelOrchestrator(validator=FaultyValidator())
+        ctx = OrchestrationContext(status=OrchestratorState.VALIDATING)
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "Corrupt schema validation rule" in result.metadata.get("error", "")
+
+    def test_diagnoser_exception_handling(self):
+        """FIX 3: Diagnoser exception transitions to FAILED and records error in metadata."""
+        class FaultyDiagnoser:
+            def diagnose(self, context: OrchestrationContext) -> OrchestrationContext:
+                raise RuntimeError("Diagnosis rule engine crashed")
+
+        orchestrator = SentinelOrchestrator(diagnoser=FaultyDiagnoser())
+        ctx = OrchestrationContext(status=OrchestratorState.DIAGNOSING)
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "Diagnosis rule engine crashed" in result.metadata.get("error", "")
+
+    def test_healer_exception_handling(self):
+        """FIX 3: Healer exception transitions to FAILED and records error in metadata."""
+        class FaultyHealer:
+            def heal(self, context: OrchestrationContext) -> OrchestrationContext:
+                raise KeyError("Selector synthesis database missing")
+
+        orchestrator = SentinelOrchestrator(healer=FaultyHealer())
+        ctx = OrchestrationContext(status=OrchestratorState.HEALING)
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "Selector synthesis database missing" in result.metadata.get("error", "")
+
+    def test_escalation_exception_handling(self):
+        """FIX 3: Escalator exception transitions to FAILED and records error in metadata."""
+        class FaultyEscalator:
+            def escalate(self, context: OrchestrationContext) -> OrchestrationContext:
+                raise TimeoutError("Escalation proxy timeout")
+
+        orchestrator = SentinelOrchestrator(escalator=FaultyEscalator())
+        ctx = OrchestrationContext(status=OrchestratorState.ESCALATING)
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "Escalation proxy timeout" in result.metadata.get("error", "")
+
+    def test_ai_service_exception_handling(self):
+        """FIX 3: AI Service exception transitions to FAILED and records error in metadata."""
+        class FaultyAIService:
+            def generate_answer(self, context: OrchestrationContext, prompt=None) -> OrchestrationContext:
+                raise RuntimeError("LLM rate limit exceeded")
+
+        orchestrator = SentinelOrchestrator(ai_service=FaultyAIService())
+        ctx = OrchestrationContext(
+            extracted_data={"title": "Clean item"},
+            verification_result={"passed": True},
+            status=OrchestratorState.AI_READY,
+        )
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.FAILED
+        assert "LLM rate limit exceeded" in result.metadata.get("error", "")
+        assert result.ai_answer is None
+
+    # --- FIX 4: Clear Stale Data Before New Collection ---
+
+    def test_stale_verification_result_cleared_before_new_collection_after_healing(self):
+        """FIX 4: Stale verification_result and extracted data are cleared when retrying after HEALING."""
+        class MockHealer:
+            def heal(self, context: OrchestrationContext) -> OrchestrationContext:
+                return context
+
+        orchestrator = SentinelOrchestrator(healer=MockHealer())
+        ctx = OrchestrationContext(
+            url="https://example.com/retry-heal",
+            schema={"type": "object"},
+            collector_id="col_42",
+            failure_signature="OLD_SIG",
+            extracted_data={"stale": "data"},
+            trust_score=0.75,
+            failed_fields=["price"],
+            verification_result={"passed": False, "stale": True},
+            cost_ledger={"usd": 0.01},
+            status=OrchestratorState.HEALING,
+            healing_attempts=0,
+        )
+
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.COLLECTING
+        assert result.verification_result is None
+        assert result.extracted_data is None
+        assert result.trust_score == 0.0
+        assert result.failed_fields == []
+        # Preserved fields
+        assert result.url == "https://example.com/retry-heal"
+        assert result.schema == {"type": "object"}
+        assert result.collector_id == "col_42"
+        assert result.failure_signature == "OLD_SIG"
+        assert result.healing_attempts == 1
+        assert result.cost_ledger == {"usd": 0.01}
+
+    def test_stale_verification_result_cleared_before_new_collection_after_escalating(self):
+        """FIX 4: Stale verification_result and extracted data are cleared when retrying after ESCALATING."""
+        class MockEscalator:
+            def escalate(self, context: OrchestrationContext) -> OrchestrationContext:
+                context.metadata["escalation_succeeded"] = True
+                return context
+
+        orchestrator = SentinelOrchestrator(escalator=MockEscalator())
+        ctx = OrchestrationContext(
+            url="https://example.com/retry-esc",
+            extracted_data={"stale": "data"},
+            trust_score=0.5,
+            verification_result={"passed": False, "score": 0.5},
+            status=OrchestratorState.ESCALATING,
+            escalation_attempts=0,
+        )
+
+        result = orchestrator.step(ctx)
+
+        assert result.status == OrchestratorState.COLLECTING
+        assert result.verification_result is None
+        assert result.extracted_data is None
+        assert result.trust_score == 0.0
+        assert result.is_verified() is False
+        assert result.escalation_attempts == 1

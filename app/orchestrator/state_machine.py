@@ -66,14 +66,24 @@ class SentinelOrchestrator:
 
         # 2. COLLECTING
         elif current_state == OrchestratorState.COLLECTING:
-            context = self.collector.collect(context)
-            context.record_state(OrchestratorState.VALIDATING)
+            try:
+                context = self.collector.collect(context)
+                context.record_state(OrchestratorState.VALIDATING)
+            except Exception as e:
+                logger.exception("Collector failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
             return context
 
         # 3. VALIDATING
         elif current_state == OrchestratorState.VALIDATING:
-            context = self.validator.validate(context)
-            context.record_state(OrchestratorState.TRUST_GATE)
+            try:
+                context = self.validator.validate(context)
+                context.record_state(OrchestratorState.TRUST_GATE)
+            except Exception as e:
+                logger.exception("Validator failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
             return context
 
         # 4. TRUST_GATE
@@ -92,7 +102,13 @@ class SentinelOrchestrator:
 
         # 5. DIAGNOSING
         elif current_state == OrchestratorState.DIAGNOSING:
-            context = self.diagnoser.diagnose(context)
+            try:
+                context = self.diagnoser.diagnose(context)
+            except Exception as e:
+                logger.exception("Diagnoser failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
+                return context
             
             # Non-healable failures immediately route to escalation or blocked
             if not context.is_healable:
@@ -119,9 +135,16 @@ class SentinelOrchestrator:
                 return context
 
             context.healing_attempts += 1
-            context = self.healer.heal(context)
-            # Reset pipeline back to collection/validation
-            context.record_state(OrchestratorState.COLLECTING)
+            try:
+                context = self.healer.heal(context)
+                # Clear stale extraction/validation state before fresh collection
+                context.reset_for_new_collection()
+                # Reset pipeline back to collection/validation
+                context.record_state(OrchestratorState.COLLECTING)
+            except Exception as e:
+                logger.exception("Healer failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
             return context
 
         # 7. ESCALATING
@@ -132,9 +155,17 @@ class SentinelOrchestrator:
                 return context
 
             context.escalation_attempts += 1
-            context = self.escalator.escalate(context)
+            try:
+                context = self.escalator.escalate(context)
+            except Exception as e:
+                logger.exception("Escalator failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
+                return context
             
-            if context.metadata.get("escalation_succeeded", True):
+            if context.metadata.get("escalation_succeeded") is True:
+                # Clear stale extraction/validation state before fresh collection
+                context.reset_for_new_collection()
                 # Reset pipeline back to collection with escalated tier
                 context.record_state(OrchestratorState.COLLECTING)
             else:
@@ -154,7 +185,12 @@ class SentinelOrchestrator:
                 context.record_state(OrchestratorState.FAILED)
                 raise RuntimeError("Security violation: Attempted AI generation on unverified data.")
 
-            context = self.ai_service.generate_answer(context, prompt=context.ai_prompt)
+            try:
+                context = self.ai_service.generate_answer(context, prompt=context.ai_prompt)
+            except Exception as e:
+                logger.exception("AI service failed: %s", e)
+                context.metadata["error"] = str(e)
+                context.record_state(OrchestratorState.FAILED)
             return context
 
         # 10. Terminal States: BLOCKED / FAILED
