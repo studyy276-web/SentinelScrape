@@ -72,7 +72,9 @@ class StubCollector:
         self.calls += 1
         if self.should_fail:
             context.extracted_data = None
-        else:
+        elif context.extracted_data is None:
+            context.extracted_data = self.data_to_return
+        elif self.data_to_return != {"title": "Sample Title", "price": "$19.99"}:
             context.extracted_data = self.data_to_return
         return context
 

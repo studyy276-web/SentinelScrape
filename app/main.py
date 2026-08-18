@@ -1,6 +1,7 @@
 """SentinelScrape FastAPI Application Entrypoint."""
 
 from fastapi import FastAPI
+from app.api.analyze import router as analyze_router
 from app.api.health import router as health_router
 
 
@@ -14,6 +15,7 @@ def create_app() -> FastAPI:
 
     # Register API routers
     application.include_router(health_router)
+    application.include_router(analyze_router)
 
     return application
 
