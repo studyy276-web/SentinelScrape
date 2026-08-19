@@ -5,6 +5,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.diagnosis.diagnoser import SentinelDiagnoser
+from app.healing.escalator import SentinelEscalator
+from app.healing.healer import SentinelHealer
 from app.integrations.brightdata.collector import BrightDataCollector
 from app.ledger.budget_guard import BudgetGuard
 from app.models.request import AnalyzeRequest
@@ -18,19 +20,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analysis"])
 
-# Persistent collector, baseline store, validator, diagnoser, and budget guard instances for the API
+# Persistent pipeline components for the API
 _shared_collector = BrightDataCollector()
 _shared_validator = SentinelValidator()
 _shared_diagnoser = SentinelDiagnoser()
+_shared_healer = SentinelHealer()
+_shared_escalator = SentinelEscalator()
 _shared_budget_guard = BudgetGuard()
 
 
 def get_orchestrator() -> SentinelOrchestrator:
-    """Dependency provider returning an orchestrator wired with BrightDataCollector, SentinelValidator, SentinelDiagnoser, and BudgetGuard."""
+    """Dependency provider returning an orchestrator wired with BrightDataCollector, SentinelValidator, SentinelDiagnoser, SentinelHealer, SentinelEscalator, and BudgetGuard."""
     return SentinelOrchestrator(
         collector=_shared_collector,
         validator=_shared_validator,
         diagnoser=_shared_diagnoser,
+        healer=_shared_healer,
+        escalator=_shared_escalator,
         budget_guard=_shared_budget_guard,
     )
 
