@@ -1,14 +1,14 @@
-"""Integrations package - external connectors including Bright Data Scraper Studio."""
+"""Bright Data integration package."""
 
-from app.integrations.brightdata import (
+from app.integrations.brightdata.client import (
     BrightDataAPIError,
     BrightDataClient,
     BrightDataConfig,
     BrightDataConfigError,
-    BrightDataCollector,
     BrightDataError,
     BrightDataResponse,
 )
+from app.integrations.brightdata.collector import BrightDataCollector
 
 __all__ = [
     "BrightDataAPIError",
