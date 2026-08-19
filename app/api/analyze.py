@@ -8,6 +8,7 @@ from app.models.request import AnalyzeRequest
 from app.models.response import SentinelResponse
 from app.orchestrator.context import OrchestrationContext
 from app.orchestrator.state_machine import SentinelOrchestrator
+from app.orchestrator.states import OrchestratorState
 from app.validation.validator import SentinelValidator
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,6 @@ async def analyze_data(
         schema=request.schema,
         ai_prompt=request.prompt,
         collector_id=request.collector_id,
-        extracted_data=request.extracted_data,
         metadata=request.metadata or {},
         compute_tier=request.compute_tier or "standard",
     )
@@ -53,7 +53,7 @@ async def analyze_data(
     except Exception as e:
         logger.exception("Orchestration pipeline execution error: %s", e)
         context.metadata["error"] = str(e)
-        context.record_state(final_context.status if 'final_context' in locals() else context.status)
+        context.record_state(OrchestratorState.FAILED)
         return context.to_response()
 
     return final_context.to_response()

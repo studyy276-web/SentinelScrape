@@ -13,6 +13,5 @@ class AnalyzeRequest(BaseModel):
     schema: Optional[Dict[str, Any]] = Field(default=None)
     prompt: Optional[str] = Field(default=None)
     collector_id: Optional[str] = Field(default=None)
-    extracted_data: Optional[Any] = Field(default=None)
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
     compute_tier: Optional[str] = "standard"

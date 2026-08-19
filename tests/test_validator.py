@@ -391,3 +391,24 @@ class TestSentinelValidator:
 
         assert validate_availability("in_stock")[0] is True
         assert validate_availability("")[0] is False
+
+    def test_baseline_store_thread_safety(self):
+        """Verify BaselineStore handles concurrent multi-threaded reads/writes safely."""
+        import concurrent.futures
+
+        store = BaselineStore()
+        validator = SentinelValidator(baseline_store=store)
+        schema = {"price": "price"}
+
+        def worker(i: int):
+            key = f"https://example.com/item/{i % 10}"
+            validator.validate_data({"price": 100.0 + (i % 5)}, schema, key=key)
+            return store.get_baseline(key)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+            futures = [executor.submit(worker, i) for i in range(100)]
+            results = [f.result() for f in futures]
+
+        assert len(results) == 100
+        for i in range(10):
+            assert store.has_baseline(f"https://example.com/item/{i}") is True

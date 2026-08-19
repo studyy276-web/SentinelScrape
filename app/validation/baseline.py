@@ -1,7 +1,6 @@
-"""Baseline management for tracking historical verified extraction data."""
-
-from typing import Any, Dict, Optional
+import threading
 import time
+from typing import Any, Dict, Optional
 
 
 class BaselineStore:
@@ -9,14 +8,20 @@ class BaselineStore:
 
     def __init__(self):
         self._baselines: Dict[str, Dict[str, Any]] = {}
+        self._lock = threading.Lock()
 
     def get_baseline(self, key: str) -> Optional[Dict[str, Any]]:
         """Retrieves historical baseline for a given URL or identifier."""
-        return self._baselines.get(key)
+        with self._lock:
+            record = self._baselines.get(key)
+            if record is not None:
+                return dict(record)
+            return None
 
     def has_baseline(self, key: str) -> bool:
         """Returns True if a baseline exists for the key."""
-        return key in self._baselines
+        with self._lock:
+            return key in self._baselines
 
     def save_baseline(
         self,
@@ -35,9 +40,11 @@ class BaselineStore:
             "created_at": time.time(),
             "metadata": metadata or {},
         }
-        self._baselines[key] = baseline_record
+        with self._lock:
+            self._baselines[key] = baseline_record
         return baseline_record
 
     def clear(self) -> None:
         """Clears all stored baselines."""
-        self._baselines.clear()
+        with self._lock:
+            self._baselines.clear()
