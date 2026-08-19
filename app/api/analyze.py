@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.diagnosis.diagnoser import SentinelDiagnoser
 from app.models.request import AnalyzeRequest
 from app.models.response import SentinelResponse
 from app.orchestrator.context import OrchestrationContext
@@ -15,13 +16,17 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analysis"])
 
-# Persistent baseline store and validator instance for the API
+# Persistent baseline store, validator, and diagnoser instances for the API
 _shared_validator = SentinelValidator()
+_shared_diagnoser = SentinelDiagnoser()
 
 
 def get_orchestrator() -> SentinelOrchestrator:
-    """Dependency provider returning an orchestrator wired with the real SentinelValidator."""
-    return SentinelOrchestrator(validator=_shared_validator)
+    """Dependency provider returning an orchestrator wired with the real SentinelValidator and SentinelDiagnoser."""
+    return SentinelOrchestrator(
+        validator=_shared_validator,
+        diagnoser=_shared_diagnoser,
+    )
 
 
 @router.post("/analyze", response_model=SentinelResponse)
