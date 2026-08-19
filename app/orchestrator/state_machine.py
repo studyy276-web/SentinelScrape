@@ -3,6 +3,8 @@
 import logging
 from typing import Optional
 
+from app.ledger.budget_guard import BudgetGuard
+from app.ledger.cost_ledger import CostLedger
 from app.orchestrator.context import OrchestrationContext
 from app.orchestrator.interfaces import (
     AIService,
@@ -47,6 +49,8 @@ class SentinelOrchestrator:
         healer: Optional[Healer] = None,
         escalator: Optional[Escalator] = None,
         ai_service: Optional[AIService] = None,
+        budget_guard: Optional[BudgetGuard] = None,
+        enable_cost_tracking: bool = False,
     ):
         self.collector = collector or StubCollector()
         self.validator = validator or StubValidator()
@@ -54,6 +58,8 @@ class SentinelOrchestrator:
         self.healer = healer or StubHealer()
         self.escalator = escalator or StubEscalator()
         self.ai_service = ai_service or StubAIService()
+        self.budget_guard = budget_guard
+        self.enable_cost_tracking = enable_cost_tracking or (budget_guard is not None)
 
     def step(self, context: OrchestrationContext) -> OrchestrationContext:
         """Executes a single deterministic state transition in the state machine."""
@@ -66,8 +72,18 @@ class SentinelOrchestrator:
 
         # 2. COLLECTING
         elif current_state == OrchestratorState.COLLECTING:
+            if self.budget_guard:
+                ledger = CostLedger(initial_data=context.cost_ledger)
+                tier_cost = ledger.get_tier_rate(context.compute_tier)
+                if not self.budget_guard.enforce(context, ledger=ledger, proposed_cost_usd=tier_cost):
+                    return context
+
             try:
                 context = self.collector.collect(context)
+                if self.enable_cost_tracking:
+                    ledger = CostLedger(initial_data=context.cost_ledger)
+                    ledger.record_collection(tier=context.compute_tier or "standard")
+                    context.cost_ledger = ledger.to_dict()
                 context.record_state(OrchestratorState.VALIDATING)
             except Exception as e:
                 logger.exception("Collector failed: %s", e)
@@ -134,9 +150,18 @@ class SentinelOrchestrator:
                     context.record_state(OrchestratorState.BLOCKED)
                 return context
 
+            if self.budget_guard:
+                ledger = CostLedger(initial_data=context.cost_ledger)
+                if not self.budget_guard.enforce(context, ledger=ledger, proposed_cost_usd=0.002):
+                    return context
+
             context.healing_attempts += 1
             try:
                 context = self.healer.heal(context)
+                if self.enable_cost_tracking:
+                    ledger = CostLedger(initial_data=context.cost_ledger)
+                    ledger.record_healing(source=context.healing_source or "CSS_SELECTOR_FALLBACK")
+                    context.cost_ledger = ledger.to_dict()
                 # Clear stale extraction/validation state before fresh collection
                 context.reset_for_new_collection()
                 # Reset pipeline back to collection/validation
@@ -154,9 +179,18 @@ class SentinelOrchestrator:
                 context.record_state(OrchestratorState.BLOCKED)
                 return context
 
+            if self.budget_guard:
+                ledger = CostLedger(initial_data=context.cost_ledger)
+                if not self.budget_guard.enforce(context, ledger=ledger, proposed_cost_usd=0.015):
+                    return context
+
             context.escalation_attempts += 1
             try:
                 context = self.escalator.escalate(context)
+                if self.enable_cost_tracking:
+                    ledger = CostLedger(initial_data=context.cost_ledger)
+                    ledger.record_escalation(from_tier="standard", to_tier=context.compute_tier or "unblocker_browser")
+                    context.cost_ledger = ledger.to_dict()
             except Exception as e:
                 logger.exception("Escalator failed: %s", e)
                 context.metadata["error"] = str(e)
@@ -185,8 +219,19 @@ class SentinelOrchestrator:
                 context.record_state(OrchestratorState.FAILED)
                 raise RuntimeError("Security violation: Attempted AI generation on unverified data.")
 
+            if self.budget_guard:
+                ledger = CostLedger(initial_data=context.cost_ledger)
+                if not self.budget_guard.enforce(context, ledger=ledger, proposed_cost_usd=0.0005, proposed_tokens=100):
+                    return context
+
             try:
                 context = self.ai_service.generate_answer(context, prompt=context.ai_prompt)
+                if self.enable_cost_tracking:
+                    ledger = CostLedger(initial_data=context.cost_ledger)
+                    prompt_len = max(10, len(context.ai_prompt or "") // 4)
+                    completion_len = max(10, len(context.ai_answer or "") // 4)
+                    ledger.record_ai_generation(prompt_tokens=prompt_len, completion_tokens=completion_len)
+                    context.cost_ledger = ledger.to_dict()
             except Exception as e:
                 logger.exception("AI service failed: %s", e)
                 context.metadata["error"] = str(e)

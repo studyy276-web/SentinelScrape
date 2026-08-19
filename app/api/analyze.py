@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.diagnosis.diagnoser import SentinelDiagnoser
+from app.ledger.budget_guard import BudgetGuard
 from app.models.request import AnalyzeRequest
 from app.models.response import SentinelResponse
 from app.orchestrator.context import OrchestrationContext
@@ -16,16 +17,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analysis"])
 
-# Persistent baseline store, validator, and diagnoser instances for the API
+# Persistent baseline store, validator, diagnoser, and budget guard instances for the API
 _shared_validator = SentinelValidator()
 _shared_diagnoser = SentinelDiagnoser()
+_shared_budget_guard = BudgetGuard()
 
 
 def get_orchestrator() -> SentinelOrchestrator:
-    """Dependency provider returning an orchestrator wired with the real SentinelValidator and SentinelDiagnoser."""
+    """Dependency provider returning an orchestrator wired with SentinelValidator, SentinelDiagnoser, and BudgetGuard."""
     return SentinelOrchestrator(
         validator=_shared_validator,
         diagnoser=_shared_diagnoser,
+        budget_guard=_shared_budget_guard,
     )
 
 
