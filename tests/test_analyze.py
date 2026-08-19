@@ -26,6 +26,23 @@ class TestAnalyzeEndpoint:
         yield
         _shared_validator.baseline_store.clear()
 
+    @pytest.fixture(autouse=True)
+    def mock_default_brightdata_scrape(self):
+        """Mocks default BrightData scrape for endpoint tests to ensure test isolation and no network calls."""
+        from unittest.mock import patch
+        from app.integrations.brightdata.client import BrightDataResponse
+        with patch(
+            "app.integrations.brightdata.client.BrightDataClient.scrape",
+            return_value=BrightDataResponse(
+                success=True,
+                status_code=200,
+                data={"title": "Sample Title", "price": "$19.99"},
+                raw_content="<html><body>Sample Title $19.99</body></html>",
+                tier_used="scraping_browser",
+            ),
+        ):
+            yield
+
     def test_analyze_successful_flow(self):
         """Verify successful POST /analyze completes full pipeline and reaches AI_READY."""
         payload = {

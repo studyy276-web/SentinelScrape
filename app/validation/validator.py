@@ -252,6 +252,12 @@ class SentinelValidator:
         context.trust_score = result["trust_score"]
         context.failed_fields = result["failed_fields"]
         if result["failure_signature"]:
-            context.failure_signature = result["failure_signature"]
+            if context.failure_signature:
+                existing_sigs = [s.strip() for s in context.failure_signature.split(",") if s.strip()]
+                new_sigs = [s.strip() for s in result["failure_signature"].split(",") if s.strip()]
+                combined = sorted(set(existing_sigs + new_sigs))
+                context.failure_signature = ", ".join(combined)
+            else:
+                context.failure_signature = result["failure_signature"]
 
         return context
