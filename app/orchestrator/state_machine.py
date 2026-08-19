@@ -78,6 +78,16 @@ class SentinelOrchestrator:
                 if not self.budget_guard.enforce(context, ledger=ledger, proposed_cost_usd=tier_cost):
                     return context
 
+            # Record collection attempt in structured history
+            if "attempt_history" not in context.metadata:
+                context.metadata["attempt_history"] = []
+            context.metadata["attempt_history"].append({
+                "stage": "COLLECTING",
+                "tier": context.compute_tier or "standard",
+                "healing_attempt": context.healing_attempts,
+                "escalation_attempt": context.escalation_attempts,
+            })
+
             try:
                 context = self.collector.collect(context)
                 if self.enable_cost_tracking:
@@ -162,6 +172,16 @@ class SentinelOrchestrator:
                     ledger = CostLedger(initial_data=context.cost_ledger)
                     ledger.record_healing(source=context.healing_source or "CSS_SELECTOR_FALLBACK")
                     context.cost_ledger = ledger.to_dict()
+
+                # Record healing event in structured history
+                if "healing_history" not in context.metadata:
+                    context.metadata["healing_history"] = []
+                context.metadata["healing_history"].append({
+                    "attempt": context.healing_attempts,
+                    "strategy": context.healing_source,
+                    "failed_fields": list(context.failed_fields or []),
+                })
+
                 # Clear stale extraction/validation state before fresh collection
                 context.reset_for_new_collection()
                 # Reset pipeline back to collection/validation
@@ -191,6 +211,15 @@ class SentinelOrchestrator:
                     ledger = CostLedger(initial_data=context.cost_ledger)
                     ledger.record_escalation(from_tier="standard", to_tier=context.compute_tier or "unblocker_browser")
                     context.cost_ledger = ledger.to_dict()
+
+                # Record escalation event in structured history
+                if "escalation_history" not in context.metadata:
+                    context.metadata["escalation_history"] = []
+                context.metadata["escalation_history"].append({
+                    "attempt": context.escalation_attempts,
+                    "tier": context.compute_tier,
+                    "reason": context.failure_signature,
+                })
             except Exception as e:
                 logger.exception("Escalator failed: %s", e)
                 context.metadata["error"] = str(e)

@@ -41,7 +41,6 @@ class BrightDataCollector:
             context.metadata["brightdata_error"] = response.error
             if response.error:
                 clean_sig = response.error.split(":")[0].strip()
-                if not context.failure_signature:
-                    context.failure_signature = clean_sig
+                context.failure_signature = clean_sig
 
         return context
