@@ -3,6 +3,7 @@
 import logging
 from typing import Optional
 
+from app.audit.auditor import ExecutionAuditor
 from app.ledger.budget_guard import BudgetGuard
 from app.ledger.cost_ledger import CostLedger
 from app.orchestrator.context import OrchestrationContext
@@ -297,5 +298,11 @@ class SentinelOrchestrator:
 
             context = self.step(context)
             steps += 1
+
+        try:
+            audit = ExecutionAuditor.build_audit_record(context)
+            context.metadata["audit_record"] = audit.model_dump()
+        except Exception as e:
+            logger.warning("Failed to construct audit record: %s", e)
 
         return context
