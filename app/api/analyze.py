@@ -20,23 +20,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Analysis"])
 
+from app.integrations.gemini.service import GoogleGeminiService
+
 # Persistent pipeline components for the API
 _shared_collector = BrightDataCollector()
 _shared_validator = SentinelValidator()
 _shared_diagnoser = SentinelDiagnoser()
 _shared_healer = SentinelHealer()
 _shared_escalator = SentinelEscalator()
+_shared_ai_service = GoogleGeminiService()
 _shared_budget_guard = BudgetGuard()
 
 
 def get_orchestrator() -> SentinelOrchestrator:
-    """Dependency provider returning an orchestrator wired with BrightDataCollector, SentinelValidator, SentinelDiagnoser, SentinelHealer, SentinelEscalator, and BudgetGuard."""
+    """Dependency provider returning an orchestrator wired with BrightDataCollector, SentinelValidator, SentinelDiagnoser, SentinelHealer, SentinelEscalator, GoogleGeminiService, and BudgetGuard."""
     return SentinelOrchestrator(
         collector=_shared_collector,
         validator=_shared_validator,
         diagnoser=_shared_diagnoser,
         healer=_shared_healer,
         escalator=_shared_escalator,
+        ai_service=_shared_ai_service,
         budget_guard=_shared_budget_guard,
     )
 

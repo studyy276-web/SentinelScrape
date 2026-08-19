@@ -43,6 +43,34 @@ class TestAnalyzeEndpoint:
         ):
             yield
 
+    @pytest.fixture(autouse=True)
+    def mock_gemini_client(self):
+        """Mocks Gemini Client for analyze endpoints."""
+        from unittest.mock import patch
+        with patch("app.integrations.gemini.service.genai.Client") as mock_client:
+            mock_instance = mock_client.return_value
+            mock_response = mock_instance.models.generate_content.return_value
+            mock_response.text = "Summarize verified item: it is a laptop."
+
+            # Temporarily inject a dummy key so the service thinks it's configured
+            import os
+            original_key = os.environ.get("GEMINI_API_KEY")
+            os.environ["GEMINI_API_KEY"] = "dummy"
+
+            # Re-initialize the shared AI service with the mock key
+            from app.api.analyze import _shared_ai_service
+            _shared_ai_service.api_key = "dummy"
+            _shared_ai_service.client = mock_instance
+
+            yield mock_instance
+
+            if original_key is not None:
+                os.environ["GEMINI_API_KEY"] = original_key
+            else:
+                del os.environ["GEMINI_API_KEY"]
+            _shared_ai_service.api_key = None
+            _shared_ai_service.client = None
+
     def test_analyze_successful_flow(self):
         """Verify successful POST /analyze completes full pipeline and reaches AI_READY."""
         payload = {
